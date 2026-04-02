@@ -1,11 +1,14 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+
+from app.copilot_manager import get_bearer_token
 
 router = APIRouter()
 
 
 @router.post("/v1/embeddings")
-async def create_embeddings():
+async def create_embeddings(request: Request):
+    get_bearer_token(request)
     return JSONResponse(
         status_code=501,
         content={

@@ -15,14 +15,14 @@ import urllib.request
 import uuid
 from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, create_model
 
 from copilot import define_tool
 from copilot.session import PermissionHandler
 
-from app.copilot_manager import get_client
+from app.copilot_manager import get_bearer_token, get_client
 from app.schemas import (
     ChatCompletionChunk,
     ChatCompletionRequest,
@@ -298,6 +298,7 @@ async def _stream(
     attachments,
     tracker: list[dict],
     model: str,
+    include_usage: bool = False,
 ) -> AsyncGenerator[str, None]:
     chunk_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
@@ -335,11 +336,13 @@ async def _stream(
 
             etype = event.type.value if hasattr(event.type, "value") else str(event.type)
 
-            if etype == "assistant.message_delta":
+            if etype in ("assistant.message_delta", "assistant.streaming_delta"):
                 # If tools have already been tracked, suppress post-tool text.
                 if tracker:
                     continue
                 delta = getattr(event.data, "delta_content", None) or ""
+                if not delta:
+                    delta = getattr(event.data, "content", None) or ""
                 if delta:
                     yield _sse(
                         ChatCompletionChunk(
@@ -405,6 +408,16 @@ async def _stream(
                             ],
                         )
                     )
+                if include_usage:
+                    yield _sse(
+                        ChatCompletionChunk(
+                            id=chunk_id,
+                            created=created,
+                            model=model,
+                            choices=[],
+                            usage=Usage(),
+                        )
+                    )
                 yield "data: [DONE]\n\n"
                 break
     finally:
@@ -422,8 +435,9 @@ def _sse(chunk: ChatCompletionChunk) -> str:
 
 
 @router.post("/v1/chat/completions")
-async def chat_completions(request: ChatCompletionRequest):
-    client = get_client()
+async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
+    github_token = get_bearer_token(raw_request)
+    client = await get_client(github_token)
 
     # 1. System message
     system_content = _extract_system(request.messages)
@@ -440,6 +454,14 @@ async def chat_completions(request: ChatCompletionRequest):
             "Below is the conversation so far. "
             "Continue naturally from the last turn.\n\n"
             f"<conversation_history>\n{history}\n</conversation_history>"
+        )
+    if (
+        request.response_format
+        and getattr(request.response_format, "type", None) == "json_object"
+    ):
+        sys_parts.append(
+            "You MUST respond with valid JSON only. "
+            "Do not include any text outside the JSON object."
         )
     full_system = "\n\n".join(sys_parts) if sys_parts else None
 
@@ -458,13 +480,19 @@ async def chat_completions(request: ChatCompletionRequest):
         session_kw["tools"] = copilot_tools
     if request.reasoning_effort:
         session_kw["reasoning_effort"] = request.reasoning_effort
+    if request.stream:
+        session_kw["streaming"] = True
 
     session = await client.create_session(**session_kw)
 
     try:
         if request.stream:
+            include_usage = (
+                request.stream_options is not None
+                and request.stream_options.include_usage
+            )
             return StreamingResponse(
-                _stream(session, prompt, attachments, tool_tracker, request.model),
+                _stream(session, prompt, attachments, tool_tracker, request.model, include_usage),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",

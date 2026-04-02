@@ -52,6 +52,14 @@ class ChatMessage(BaseModel):
     tool_call_id: str | None = None
 
 
+class ResponseFormat(BaseModel):
+    type: str = "text"
+
+
+class StreamOptions(BaseModel):
+    include_usage: bool = False
+
+
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[ChatMessage]
@@ -59,15 +67,23 @@ class ChatCompletionRequest(BaseModel):
     top_p: float | None = None
     n: int | None = None
     stream: bool = False
+    stream_options: StreamOptions | None = None
     stop: str | list[str] | None = None
     max_tokens: int | None = None
     max_completion_tokens: int | None = None
     presence_penalty: float | None = None
     frequency_penalty: float | None = None
+    logit_bias: dict[str, float] | None = None
+    logprobs: bool | None = None
+    top_logprobs: int | None = None
     tools: list[ToolDefinition] | None = None
     tool_choice: str | dict | None = None
+    response_format: ResponseFormat | None = None
+    seed: int | None = None
     reasoning_effort: str | None = None
     user: str | None = None
+
+    model_config = {"extra": "allow"}
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +99,7 @@ class ResponseMessage(BaseModel):
 class Choice(BaseModel):
     index: int = 0
     message: ResponseMessage
+    logprobs: Any | None = None
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] | None = "stop"
 
 
@@ -97,6 +114,7 @@ class ChatCompletionResponse(BaseModel):
     object: Literal["chat.completion"] = "chat.completion"
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
+    system_fingerprint: str | None = None
     choices: list[Choice]
     usage: Usage = Field(default_factory=Usage)
 
@@ -126,6 +144,7 @@ class DeltaMessage(BaseModel):
 class StreamChoice(BaseModel):
     index: int = 0
     delta: DeltaMessage
+    logprobs: Any | None = None
     finish_reason: Literal["stop", "length", "tool_calls", "content_filter"] | None = None
 
 
@@ -134,7 +153,9 @@ class ChatCompletionChunk(BaseModel):
     object: Literal["chat.completion.chunk"] = "chat.completion.chunk"
     created: int
     model: str
+    system_fingerprint: str | None = None
     choices: list[StreamChoice]
+    usage: Usage | None = None
 
 
 # ---------------------------------------------------------------------------
