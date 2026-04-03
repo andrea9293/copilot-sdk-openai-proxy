@@ -9,7 +9,7 @@ from typing import Any
 
 import httpx
 
-from copilot import Tool, ToolInvocation, ToolResult
+from copilot.tools import Tool, ToolInvocation, ToolResult
 
 from .models import ContentPartImageURL, ContentPartText, Message, Tool as OAITool
 

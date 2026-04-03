@@ -16,6 +16,7 @@ RUN npm install -g @github/copilot
 
 # Install Python dependencies
 COPY pyproject.toml .
+COPY server/ ./server/
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir .
 
@@ -46,8 +47,7 @@ COPY server/ ./server/
 
 EXPOSE 8081
 
-# Authentication: set COPILOT_GITHUB_TOKEN (or GH_TOKEN / GITHUB_TOKEN) at runtime
-ENV COPILOT_GITHUB_TOKEN=""
+# Authentication: pass COPILOT_GITHUB_TOKEN (or GH_TOKEN / GITHUB_TOKEN) at runtime
 
 # Allow configuring the listening port at runtime (default: 8081)
 ENV PORT="8081"

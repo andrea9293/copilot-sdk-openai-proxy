@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "OpenAI-compatible proxy server powered by the GitHub Copilot SDK"
 requires-python = ">=3.11"
 dependencies = [
-    "github-copilot-sdk",
+    "github-copilot-sdk>=0.2.1",
     "fastapi",
     "uvicorn[standard]",
     "httpx",

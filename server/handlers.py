@@ -9,7 +9,8 @@ import time
 import uuid
 from typing import Any, AsyncIterator
 
-from copilot import CopilotClient, PermissionHandler
+from copilot import CopilotClient
+from copilot.session import PermissionHandler
 from copilot.generated.session_events import SessionEvent, SessionEventType
 
 from .converters import (
