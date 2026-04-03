@@ -19,6 +19,10 @@ Installation
 
 2. Install in editable / development mode:
 
+   python3 -m venv .venv
+   
+   source .venv/bin/activate
+
    python -m pip install -e .
 
 (If the project uses Poetry or another tool, run the tool-specific install instead.)

@@ -4,20 +4,20 @@ import os
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="ghu_cldQAPuZU6VBhvBZ8Rce0JPLhAxxMm0ptULp",
+    base_url="http://localhost:8001/v1",
+    api_key="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",
 )
 MODEL = "gpt-5-mini"
 
 # 1. List models
-print("=== 1. List models ===")
-models = client.models.list()
-print(f"OK — {len(models.data)} model(s): {[m.id for m in models.data][:5]}")
+# print("=== 1. List models ===")
+# models = client.models.list()
+# print(f"OK — {len(models.data)} model(s): {[m.id for m in models.data][:5]}")
 
-# 2. Retrieve single model
-print("\n=== 2. Retrieve model ===")
-model = client.models.retrieve(MODEL)
-print(f"OK — {model.id}, owned_by={model.owned_by}")
+# # 2. Retrieve single model
+# print("\n=== 2. Retrieve model ===")
+# model = client.models.retrieve(MODEL)
+# print(f"OK — {model.id}, owned_by={model.owned_by}")
 
 # # 3. Non-streaming chat completion
 # print("\n=== 3. Chat completion (non-streaming) ===")
