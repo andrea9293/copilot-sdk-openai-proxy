@@ -40,7 +40,7 @@ COPY --from=builder /usr/bin/copilot /usr/bin/copilot
 
 # Copy installed Python packages and entry-point scripts
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin/copilot-openai-proxy /usr/local/bin/copilot-openai-proxy
+COPY --from=builder /usr/local/bin/copilot-sdk-openai-proxy /usr/local/bin/copilot-sdk-openai-proxy
 
 # Copy application source
 COPY server/ ./server/
@@ -53,4 +53,4 @@ EXPOSE 8081
 ENV PORT="8081"
 
 # Use a shell entrypoint so we can expand the PORT env var into the command line
-ENTRYPOINT ["/bin/sh", "-c", "exec copilot-openai-proxy --host 0.0.0.0 --port ${PORT}"]
+ENTRYPOINT ["/bin/sh", "-c", "exec copilot-sdk-openai-proxy --host 0.0.0.0 --port ${PORT}"]

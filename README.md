@@ -116,7 +116,7 @@ python test_proxy.py
 Build:
 
 ```bash
-docker build -t copilot-openai-proxy .
+docker build -t copilot-sdk-openai-proxy .
 ```
 
 Run:
@@ -125,7 +125,7 @@ Run:
 docker run --rm -p 8081:8081 \
   -e COPILOT_GITHUB_TOKEN="<your_token>" \
   -e PORT=8081 \
-  copilot-openai-proxy
+  copilot-sdk-openai-proxy
 ```
 
 Then use:

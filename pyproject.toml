@@ -1,5 +1,5 @@
 [project]
-name = "copilot-openai-proxy"
+name = "copilot-sdk-openai-proxy"
 version = "0.1.0"
 description = "OpenAI-compatible proxy server powered by the GitHub Copilot SDK"
 requires-python = ">=3.11"
@@ -11,4 +11,4 @@ dependencies = [
 ]
 
 [project.scripts]
-copilot-openai-proxy = "server.main:cli"
+copilot-sdk-openai-proxy = "server.main:cli"
