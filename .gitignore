@@ -6,3 +6,4 @@ dist/
 build/
 .env
 .vscode/
+test_files/
