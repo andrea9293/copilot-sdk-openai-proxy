@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -12,40 +11,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from copilot import CopilotClient, SubprocessConfig
-
+from .auth import router as auth_router
 from .handlers import handle_chat_completion, handle_chat_completion_stream, handle_models
 from .models import ChatCompletionRequest, ErrorResponse, ErrorDetail
+from .state import _clients, _clients_lock, extract_token, get_client
 
 logger = logging.getLogger("copilot_proxy")
-
-
-# ── Application state ────────────────────────────────────────────────────────
-
-# Cache of token -> CopilotClient so we don't spawn a new subprocess per request.
-_clients: dict[str | None, CopilotClient] = {}
-_clients_lock = asyncio.Lock()
-
-
-async def get_client(token: str | None) -> CopilotClient:
-    """Return a running CopilotClient for *token*, creating one on first use."""
-    async with _clients_lock:
-        if token not in _clients:
-            cfg = SubprocessConfig(github_token=token)
-            client = CopilotClient(cfg)
-            await client.start()
-            _clients[token] = client
-            logger.info("CopilotClient started for token %s", "****" if token else "<default>")
-        return _clients[token]
-
-
-def _extract_token(request: Request) -> str | None:
-    """Extract a Bearer token from the Authorization header, if present."""
-    auth = request.headers.get("authorization", "")
-    if auth.lower().startswith("bearer "):
-        value = auth[7:].strip()
-        return value if value else None
-    return None
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
@@ -74,6 +45,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
@@ -86,7 +59,7 @@ async def health():
 @app.get("/v1/models")
 async def models_endpoint(request: Request):
     try:
-        token = _extract_token(request)
+        token = extract_token(request)
         client = await get_client(token)
         result = await handle_models(client)
         return result.model_dump()
@@ -109,7 +82,7 @@ async def chat_completions(request: Request):
         return _error_response(400, "Messages are required")
 
     try:
-        token = _extract_token(request)
+        token = extract_token(request)
         client = await get_client(token)
 
         if req.stream:
@@ -159,6 +132,10 @@ def cli():
 
     logger.info("Starting Copilot OpenAI proxy on http://%s:%d", args.host, args.port)
     logger.info("Endpoints:")
+    logger.info("  GET  /auth              (login UI)")
+    logger.info("  POST /auth/device/start (start GitHub device flow)")
+    logger.info("  POST /auth/device/poll  (poll device flow)")
+    logger.info("  GET  /auth/status       (check auth status)")
     logger.info("  GET  /v1/models")
     logger.info("  POST /v1/chat/completions")
     logger.info("  GET  /health")
