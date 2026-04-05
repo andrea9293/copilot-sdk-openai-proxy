@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -13,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from copilot import CopilotClient
+from copilot import CopilotClient, SubprocessConfig
 
 from .handlers import handle_chat_completion, handle_chat_completion_stream, handle_models
 from .models import ChatCompletionRequest, ErrorResponse, ErrorDetail
@@ -23,12 +22,30 @@ logger = logging.getLogger("copilot_proxy")
 
 # ── Application state ────────────────────────────────────────────────────────
 
-_client: CopilotClient | None = None
+# Cache of token -> CopilotClient so we don't spawn a new subprocess per request.
+_clients: dict[str | None, CopilotClient] = {}
+_clients_lock = asyncio.Lock()
 
 
-def get_client() -> CopilotClient:
-    assert _client is not None, "CopilotClient not initialised"
-    return _client
+async def get_client(token: str | None) -> CopilotClient:
+    """Return a running CopilotClient for *token*, creating one on first use."""
+    async with _clients_lock:
+        if token not in _clients:
+            cfg = SubprocessConfig(github_token=token)
+            client = CopilotClient(cfg)
+            await client.start()
+            _clients[token] = client
+            logger.info("CopilotClient started for token %s", "****" if token else "<default>")
+        return _clients[token]
+
+
+def _extract_token(request: Request) -> str | None:
+    """Extract a Bearer token from the Authorization header, if present."""
+    auth = request.headers.get("authorization", "")
+    if auth.lower().startswith("bearer "):
+        value = auth[7:].strip()
+        return value if value else None
+    return None
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
@@ -36,13 +53,14 @@ def get_client() -> CopilotClient:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _client
-    _client = CopilotClient()
-    await _client.start()
-    logger.info("Copilot client started")
     yield
-    await _client.stop()
-    logger.info("Copilot client stopped")
+    async with _clients_lock:
+        for token, client in _clients.items():
+            try:
+                await client.stop()
+                logger.info("CopilotClient stopped for token %s", "****" if token else "<default>")
+            except Exception:
+                logger.exception("Error stopping CopilotClient")
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
@@ -66,9 +84,11 @@ async def health():
 
 
 @app.get("/v1/models")
-async def models_endpoint():
+async def models_endpoint(request: Request):
     try:
-        result = await handle_models(get_client())
+        token = _extract_token(request)
+        client = await get_client(token)
+        result = await handle_models(client)
         return result.model_dump()
     except Exception:
         logger.exception("Error listing models")
@@ -89,9 +109,12 @@ async def chat_completions(request: Request):
         return _error_response(400, "Messages are required")
 
     try:
+        token = _extract_token(request)
+        client = await get_client(token)
+
         if req.stream:
             return StreamingResponse(
-                handle_chat_completion_stream(get_client(), req),
+                handle_chat_completion_stream(client, req),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -100,7 +123,7 @@ async def chat_completions(request: Request):
                 },
             )
 
-        result = await handle_chat_completion(get_client(), req)
+        result = await handle_chat_completion(client, req)
         return result.model_dump(exclude_none=True)
     except Exception:
         logger.exception("Error handling chat completion")
