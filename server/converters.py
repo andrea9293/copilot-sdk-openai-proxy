@@ -11,7 +11,7 @@ import httpx
 
 from copilot.tools import Tool, ToolInvocation, ToolResult
 
-from .models import ContentPartImageURL, ContentPartText, Message, Tool as OAITool
+from .models import ContentPartImageURL, ContentPartText, Message, ResponseFormat, ResponseFormatJSONObject, ResponseFormatJSONSchema, Tool as OAITool
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,51 @@ def determine_available_tools(
         return names
 
     return names
+
+
+# ── Response format / structured output ────────────────────────────────────
+
+
+def build_response_format_instruction(response_format: ResponseFormat | None) -> str | None:
+    """Return extra system-message text that instructs the model to produce
+    structured JSON output, or ``None`` when no special formatting is needed.
+    """
+    if response_format is None:
+        return None
+    if isinstance(response_format, ResponseFormatJSONObject):
+        return (
+            "You MUST respond with a single, valid JSON object and nothing else. "
+            "Do not include any prose, markdown fences, or commentary outside the JSON."
+        )
+    if isinstance(response_format, ResponseFormatJSONSchema):
+        schema = response_format.json_schema
+        schema_str = json.dumps(schema.schema_, indent=2) if schema.schema_ else "{}"
+        description_line = f" {schema.description}" if schema.description else ""
+        return (
+            f"You MUST respond with a single, valid JSON object that strictly conforms "
+            f"to the following JSON Schema (name: '{schema.name}'){description_line}.\n"
+            f"Schema:\n{schema_str}\n\n"
+            "Do not include any prose, markdown fences, or commentary outside the JSON."
+        )
+    # type == "text" — no extra instruction needed
+    return None
+
+
+def extract_json_from_content(content: str) -> str:
+    """Strip markdown code fences (e.g. ```json ... ```) from *content*, if
+    present, and return the inner JSON text.  When no fences are found the
+    original string is returned unchanged.
+    """
+    stripped = content.strip()
+    # Handle ```json\n...\n``` or ```\n...\n```
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        # Remove first line (```json or ```) and last line (```)
+        inner_lines = lines[1:]
+        if inner_lines and inner_lines[-1].strip() == "```":
+            inner_lines = inner_lines[:-1]
+        return "\n".join(inner_lines).strip()
+    return stripped
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

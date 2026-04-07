@@ -15,8 +15,10 @@ from copilot.generated.session_events import SessionEvent, SessionEventType
 
 from .converters import (
     build_prompt,
+    build_response_format_instruction,
     determine_available_tools,
     extract_attachments,
+    extract_json_from_content,
     extract_system_message,
     openai_tools_to_copilot,
 )
@@ -67,6 +69,11 @@ async def handle_chat_completion(
     prompt = build_prompt(req.messages)
     system_msg = extract_system_message(req.messages)
     attachments = await extract_attachments(req.messages)
+
+    # Structured output: append format instruction to the system message
+    format_instruction = build_response_format_instruction(req.response_format)
+    if format_instruction:
+        system_msg = f"{system_msg}\n\n{format_instruction}" if system_msg else format_instruction
 
     captured_calls: list[dict[str, Any]] = []
     copilot_tools = None
@@ -165,6 +172,9 @@ async def handle_chat_completion(
         # deferred placeholder — drop it.
         if tool_calls_out:
             content = None
+        # Strip markdown fences from structured-output responses
+        elif content and format_instruction:
+            content = extract_json_from_content(content)
 
         return ChatCompletionResponse(
             id=f"chatcmpl-{uuid.uuid4().hex[:12]}",
@@ -199,6 +209,11 @@ async def handle_chat_completion_stream(
     prompt = build_prompt(req.messages)
     system_msg = extract_system_message(req.messages)
     attachments = await extract_attachments(req.messages)
+
+    # Structured output: append format instruction to the system message
+    format_instruction = build_response_format_instruction(req.response_format)
+    if format_instruction:
+        system_msg = f"{system_msg}\n\n{format_instruction}" if system_msg else format_instruction
 
     captured_calls: list[dict[str, Any]] = []
     copilot_tools = None
@@ -392,7 +407,13 @@ async def handle_chat_completion_stream(
                 finish_reason = "tool_calls"
             else:
                 # No tool calls — replay buffered content as chunks
-                for delta in buffered_deltas:
+                # Apply JSON extraction when a response_format was requested
+                if format_instruction and buffered_deltas:
+                    full_text = extract_json_from_content("".join(buffered_deltas))
+                    deltas_to_emit = [full_text] if full_text else []
+                else:
+                    deltas_to_emit = buffered_deltas
+                for delta in deltas_to_emit:
                     yield _sse_line(
                         ChatCompletionChunk(
                             id=completion_id,
@@ -410,6 +431,9 @@ async def handle_chat_completion_stream(
 
         else:
             # ── Real-time streaming path (no tools) ──────────────────────
+            # When structured output is requested buffer everything so we can
+            # clean markdown fences before emitting.
+            realtime_buffer: list[str] = [] if format_instruction else []
             while True:
                 try:
                     item = await asyncio.wait_for(
@@ -423,6 +447,28 @@ async def handle_chat_completion_stream(
                     break
 
                 if item["type"] == "delta":
+                    if format_instruction:
+                        # Buffer — don't stream individual deltas
+                        realtime_buffer.append(item["content"])
+                    else:
+                        yield _sse_line(
+                            ChatCompletionChunk(
+                                id=completion_id,
+                                created=created,
+                                model=req.model,
+                                choices=[
+                                    Choice(
+                                        index=0,
+                                        delta=ChoiceMessage(content=item["content"]),
+                                    )
+                                ],
+                            )
+                        )
+
+            # If we buffered for structured output, emit the cleaned content now
+            if format_instruction and realtime_buffer:
+                clean = extract_json_from_content("".join(realtime_buffer))
+                if clean:
                     yield _sse_line(
                         ChatCompletionChunk(
                             id=completion_id,
@@ -431,7 +477,7 @@ async def handle_chat_completion_stream(
                             choices=[
                                 Choice(
                                     index=0,
-                                    delta=ChoiceMessage(content=item["content"]),
+                                    delta=ChoiceMessage(content=clean),
                                 )
                             ],
                         )

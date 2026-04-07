@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ── Content parts (multimodal messages) ──────────────────────────────────────
@@ -79,6 +79,34 @@ class StreamOptions(BaseModel):
     include_usage: bool = False
 
 
+# ── Response format (structured output) ─────────────────────────────────────
+
+
+class ResponseFormatText(BaseModel):
+    type: Literal["text"]
+
+
+class ResponseFormatJSONObject(BaseModel):
+    type: Literal["json_object"]
+
+
+class JSONSchemaDefinition(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str
+    description: str | None = None
+    schema_: dict[str, Any] | None = Field(None, alias="schema")
+    strict: bool | None = None
+
+
+class ResponseFormatJSONSchema(BaseModel):
+    type: Literal["json_schema"]
+    json_schema: JSONSchemaDefinition
+
+
+ResponseFormat = Union[ResponseFormatText, ResponseFormatJSONObject, ResponseFormatJSONSchema]
+
+
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: list[Message]
@@ -95,6 +123,7 @@ class ChatCompletionRequest(BaseModel):
     reasoning_effort: str | None = None
     tools: list[Tool] | None = None
     tool_choice: Any = None
+    response_format: ResponseFormat | None = None
     user: str | None = None
 
 

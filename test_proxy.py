@@ -272,6 +272,124 @@ def test_multi_step_tool_calling():
             break
 
 
+# ── 8. Structured output – json_object ──────────────────────────────────────
+
+
+def test_structured_output_json_object():
+    separator("8. Structured output – json_object")
+    resp = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that always responds with valid JSON.",
+            },
+            {
+                "role": "user",
+                "content": (
+                    "Return a JSON object with two keys: "
+                    "'capital' (string, capital city of Italy) and "
+                    "'population_millions' (number, approximate population of that city)."
+                ),
+            },
+        ],
+        response_format={"type": "json_object"},
+    )
+    content = resp.choices[0].message.content
+    print(f"Raw content: {content}")
+    parsed = json.loads(content)
+    print(f"Parsed: {parsed}")
+    print("✓ json_object structured output OK")
+
+
+# ── 9. Structured output – json_schema ──────────────────────────────────────
+
+
+def test_structured_output_json_schema():
+    separator("9. Structured output – json_schema")
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Full name of the person"},
+            "age": {"type": "integer", "description": "Age in years"},
+            "city": {"type": "string", "description": "City of residence"},
+        },
+        "required": ["name", "age", "city"],
+        "additionalProperties": False,
+    }
+    resp = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    "Create a fictional person named Marco who is 34 years old "
+                    "and lives in Turin."
+                ),
+            },
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "Person",
+                "description": "A person with name, age and city",
+                "schema": schema,
+                "strict": True,
+            },
+        },
+    )
+    content = resp.choices[0].message.content
+    print(f"Raw content: {content}")
+    parsed = json.loads(content)
+    print(f"Parsed: {parsed}")
+    print("✓ json_schema structured output OK")
+
+
+# ── 10. Structured output – json_schema (streaming) ─────────────────────────
+
+
+def test_structured_output_json_schema_streaming():
+    separator("10. Structured output – json_schema (streaming)")
+    schema = {
+        "type": "object",
+        "properties": {
+            "country": {"type": "string"},
+            "continent": {"type": "string"},
+            "fun_fact": {"type": "string"},
+        },
+        "required": ["country", "continent", "fun_fact"],
+        "additionalProperties": False,
+    }
+    stream = client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {
+                "role": "user",
+                "content": "Give me a fun fact about Japan.",
+            },
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": {
+                "name": "CountryFact",
+                "schema": schema,
+            },
+        },
+        stream=True,
+    )
+    chunks: list[str] = []
+    for chunk in stream:
+        delta = chunk.choices[0].delta
+        if delta.content:
+            chunks.append(delta.content)
+            print(delta.content, end="", flush=True)
+    print()
+    full = "".join(chunks)
+    parsed = json.loads(full)
+    print(f"Parsed: {parsed}")
+    print("✓ json_schema streaming structured output OK")
+
+
 # ── Run all ──────────────────────────────────────────────────────────────────
 
 
@@ -283,6 +401,9 @@ if __name__ == "__main__":
     test_single_tool_call()
     test_single_tool_call_streaming()
     test_multi_step_tool_calling()
+    test_structured_output_json_object()
+    test_structured_output_json_schema()
+    test_structured_output_json_schema_streaming()
     print(f"\n{'=' * 60}")
     print("  All tests completed!")
     print(f"{'=' * 60}")
