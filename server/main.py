@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
-import sys
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -13,22 +11,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from copilot import CopilotClient
-
+from .auth import router as auth_router
 from .handlers import handle_chat_completion, handle_chat_completion_stream, handle_models
 from .models import ChatCompletionRequest, ErrorResponse, ErrorDetail
+from .state import _clients, _clients_lock, extract_token, get_client
 
 logger = logging.getLogger("copilot_proxy")
-
-
-# ── Application state ────────────────────────────────────────────────────────
-
-_client: CopilotClient | None = None
-
-
-def get_client() -> CopilotClient:
-    assert _client is not None, "CopilotClient not initialised"
-    return _client
 
 
 # ── Lifespan ─────────────────────────────────────────────────────────────────
@@ -36,13 +24,14 @@ def get_client() -> CopilotClient:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _client
-    _client = CopilotClient()
-    await _client.start()
-    logger.info("Copilot client started")
     yield
-    await _client.stop()
-    logger.info("Copilot client stopped")
+    async with _clients_lock:
+        for token, client in _clients.items():
+            try:
+                await client.stop()
+                logger.info("CopilotClient stopped for token %s", "****" if token else "<default>")
+            except Exception:
+                logger.exception("Error stopping CopilotClient")
 
 
 # ── App ──────────────────────────────────────────────────────────────────────
@@ -56,6 +45,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 
@@ -66,9 +57,11 @@ async def health():
 
 
 @app.get("/v1/models")
-async def models_endpoint():
+async def models_endpoint(request: Request):
     try:
-        result = await handle_models(get_client())
+        token = extract_token(request)
+        client = await get_client(token)
+        result = await handle_models(client)
         return result.model_dump()
     except Exception:
         logger.exception("Error listing models")
@@ -89,9 +82,12 @@ async def chat_completions(request: Request):
         return _error_response(400, "Messages are required")
 
     try:
+        token = extract_token(request)
+        client = await get_client(token)
+
         if req.stream:
             return StreamingResponse(
-                handle_chat_completion_stream(get_client(), req),
+                handle_chat_completion_stream(client, req),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -100,7 +96,7 @@ async def chat_completions(request: Request):
                 },
             )
 
-        result = await handle_chat_completion(get_client(), req)
+        result = await handle_chat_completion(client, req)
         return result.model_dump(exclude_none=True)
     except Exception:
         logger.exception("Error handling chat completion")
@@ -136,6 +132,10 @@ def cli():
 
     logger.info("Starting Copilot OpenAI proxy on http://%s:%d", args.host, args.port)
     logger.info("Endpoints:")
+    logger.info("  GET  /auth              (login UI)")
+    logger.info("  POST /auth/device/start (start GitHub device flow)")
+    logger.info("  POST /auth/device/poll  (poll device flow)")
+    logger.info("  GET  /auth/status       (check auth status)")
     logger.info("  GET  /v1/models")
     logger.info("  POST /v1/chat/completions")
     logger.info("  GET  /health")

@@ -5,11 +5,12 @@ Start the proxy first:
     python -m server.main --port 8081
 
 Then run this file:
-    python test_proxy.py
+    GITHUB_TOKEN=ghp_... python test_proxy.py
 """
 
 import base64
 import json
+import os
 from pathlib import Path
 
 from openai import OpenAI
@@ -17,7 +18,15 @@ from openai import OpenAI
 BASE_URL = "http://localhost:8081/v1"
 MODEL = "gpt-5-mini"
 
-client = OpenAI(base_url=BASE_URL, api_key="not-needed")
+_token = os.environ.get("GITHUB_TOKEN", "")
+if not _token:
+    raise RuntimeError(
+        "GITHUB_TOKEN environment variable is not set. "
+        "Export your GitHub token before running this script:\n"
+        "    export GITHUB_TOKEN=ghp_..."
+    )
+
+client = OpenAI(base_url=BASE_URL, api_key=_token)
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
