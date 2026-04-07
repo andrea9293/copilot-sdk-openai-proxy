@@ -12,3 +12,6 @@ dependencies = [
 
 [project.scripts]
 copilot-sdk-openai-proxy = "server.main:cli"
+
+[tool.setuptools.packages.find]
+exclude = ["assets", "assets.*"]
