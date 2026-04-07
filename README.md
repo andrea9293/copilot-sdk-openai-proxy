@@ -1,3 +1,5 @@
+# <p align="center"><img src="assets/hero.png" alt="hero" /></p>
+
 # Copilot SDK OpenAI Proxy (Python)
 
 OpenAI-compatible API server powered by the GitHub Copilot SDK.
