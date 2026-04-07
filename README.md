@@ -226,6 +226,14 @@ python test_proxy.py
 
 ## Docker
 
+Docker Compose (recommended):
+
+```bash
+docker-compose up -d
+```
+
+or standalone Docker
+
 Build:
 
 ```bash

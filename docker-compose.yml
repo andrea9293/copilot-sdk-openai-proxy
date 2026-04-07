@@ -1,0 +1,10 @@
+services:
+  copilot-sdk-openai-proxy:
+    build:
+      # context: https://github.com/andrea9293/copilot-sdk-openai-proxy.git #for remote build (i use this in portainer stack)
+      context: . #for local build
+      dockerfile: Dockerfile
+    container_name: copilot-sdk-openai-proxy
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
