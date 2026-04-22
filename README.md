@@ -6,8 +6,8 @@ It exposes the classic OpenAI endpoints so you can use standard OpenAI clients (
 
 ## Features
 
-- **Authentication UI** — browser-based login via GitHub OAuth device flow (`GET /auth`)
-- **Auth API endpoints** — programmatic device flow start/poll and token status check
+- Authentication UI via GitHub OAuth device flow (`GET /auth`)
+- Token dashboard (`GET /auth/dashboard`) with quota and session management
 - OpenAI-compatible endpoints:
   - `GET /v1/models`
   - `POST /v1/chat/completions`
@@ -20,18 +20,74 @@ It exposes the classic OpenAI endpoints so you can use standard OpenAI clients (
 ## Requirements
 
 - Python 3.11+
-- GitHub Copilot CLI available and authenticated on the host, **or** a valid GitHub token obtained via the built-in login UI
+- GitHub Copilot CLI available/authenticated on host, or a valid GitHub token with Copilot access
 
 ## Project Layout
 
-- `server/main.py`: FastAPI app and endpoints
-- `server/state.py`: shared per-token `CopilotClient` cache
-- `server/auth.py`: authentication router (device flow + HTML UI)
+- `server/main.py`: FastAPI app, root UI, and endpoints
+- `server/auth.py`: Auth UI, dashboard UI, and auth/dashboard APIs
+- `server/state.py`: Per-token `CopilotClient` cache and session retention pruning
 - `server/handlers.py`: Copilot session orchestration
 - `server/converters.py`: OpenAI <-> Copilot conversion logic
 - `server/models.py`: OpenAI-compatible request/response models
 - `test_proxy.py`: end-to-end tests using the official OpenAI Python SDK
 - `Dockerfile`: container image for running the proxy
+
+## UI Endpoints
+
+- `GET /`: centralized home UI (navigation)
+- `GET /auth`: authentication page
+- `GET /auth/dashboard`: token dashboard
+
+## Authentication
+
+The proxy supports two authentication methods.
+
+### 1. GitHub Token (Bearer Token)
+
+Pass your GitHub token in the `Authorization` header with the `Bearer` scheme:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8081/v1",
+    api_key="ghp_your_github_token"
+)
+```
+
+### 2. OAuth Device Flow (Web UI)
+
+Open `http://localhost:8081/auth` and complete GitHub device flow. A token is shown after authentication.
+
+### Auth API endpoints
+
+- `POST /auth/device/start`: start GitHub device flow
+- `POST /auth/device/poll`: poll for device flow completion
+- `GET /auth/status`: check token auth status
+
+## Token Dashboard
+
+Open `http://localhost:8081/auth/dashboard` to:
+
+- paste/select the GitHub token to inspect
+- view Copilot quota snapshots (`account.getQuota`) including used and remaining requests
+- list persisted sessions for that token
+- delete a single session
+- prune old sessions keeping only the latest 10
+
+## Session Retention
+
+The proxy prunes persisted Copilot sessions automatically to avoid unbounded growth.
+
+- Keeps the 10 most recently modified sessions per token by default
+- Deletes older sessions through the SDK (`client.delete_session`)
+- Pruning is throttled (default once every 120 seconds per token)
+
+Environment variables:
+
+- `COPILOT_SESSION_KEEP_COUNT` (default: `10`)
+- `COPILOT_SESSION_PRUNE_INTERVAL_SECONDS` (default: `120`)
 
 ## Local Run
 
@@ -44,122 +100,19 @@ pip install -e .
 python -m server.main --host 0.0.0.0 --port 8081
 ```
 
-## Authentication
-
-The proxy supports two authentication methods.
-
-### Option 1 — Login UI (browser, recommended)
-
-Open `http://localhost:8081/auth` in your browser.
-
-The page offers two flows:
-
-1. **GitHub OAuth device flow** — click *Start GitHub Login*, enter the displayed one-time code at `github.com/login/device`, and the page automatically captures the token.
-2. **Paste an existing token** — enter a GitHub fine-grained PAT (with *Copilot Requests* permission) or the token from `gh auth token`, then click *Verify & Use Token*.
-
-After successful login the page shows the token and copy-to-clipboard button, plus a ready-to-use code snippet.
-
-### Option 2 — Environment variable / system Copilot login
-
-Set one of the following environment variables before starting the server:
-
-```
-COPILOT_GITHUB_TOKEN=<token>
-GH_TOKEN=<token>
-GITHUB_TOKEN=<token>
-```
-
-Or authenticate once with the GitHub Copilot CLI:
-
-```bash
-copilot login
-```
-
-When no `Authorization` header is provided by the client the proxy uses the locally authenticated user.
-
-### Using the token with an OpenAI client
-
-Pass the token as the `api_key`:
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://localhost:8081/v1",
-    api_key="<token>",          # token obtained from /auth
-)
-response = client.chat.completions.create(
-    model="gpt-5-mini",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-print(response.choices[0].message.content)
-```
-
-### Auth API endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET`  | `/auth` | Serve the login HTML page |
-| `POST` | `/auth/device/start` | Start the GitHub device flow; returns `device_code`, `user_code`, `verification_uri` |
-| `POST` | `/auth/device/poll` | Poll for device flow completion; returns `access_token` when authorized |
-| `GET`  | `/auth/status` | Check auth status for the token in the `Authorization: Bearer <token>` header |
-
-#### `POST /auth/device/start` — response
-
-```json
-{
-  "device_code": "...",
-  "user_code": "ABCD-1234",
-  "verification_uri": "https://github.com/login/device",
-  "expires_in": 900,
-  "interval": 5
-}
-```
-
-#### `POST /auth/device/poll` — request / response
-
-```bash
-curl -X POST http://localhost:8081/auth/device/poll \
-  -H "Content-Type: application/json" \
-  -d '{"device_code": "<device_code>"}'
-```
-
-While pending:
-
-```json
-{"pending": true, "error": "authorization_pending"}
-```
-
-When authorized:
-
-```json
-{"access_token": "gho_...", "token_type": "bearer"}
-```
-
-#### `GET /auth/status` — response
-
-```bash
-curl http://localhost:8081/auth/status \
-  -H "Authorization: Bearer <token>"
-```
-
-```json
-{"authenticated": true, "login": "your-github-login", "auth_type": "oauth"}
-```
-
 ## Quick API Checks
 
 ```bash
 curl http://localhost:8081/health
 
-# check auth status for a token
 curl http://localhost:8081/auth/status \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ghp_your_github_token"
 
 curl http://localhost:8081/v1/models \
-  -H "Authorization: Bearer <token>"
+  -H "Authorization: Bearer ghp_your_github_token"
 
 curl http://localhost:8081/v1/chat/completions \
+  -H "Authorization: Bearer ghp_your_github_token" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-5-mini",
@@ -167,48 +120,9 @@ curl http://localhost:8081/v1/chat/completions \
   }'
 ```
 
-## Tool Calling Example
-
-```bash
-curl http://localhost:8081/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gpt-5-mini",
-    "messages": [{"role": "user", "content": "What is the weather in London?"}],
-    "tools": [{
-      "type": "function",
-      "function": {
-        "name": "get_weather",
-        "description": "Get current weather",
-        "parameters": {
-          "type": "object",
-          "properties": {
-            "location": {"type": "string"}
-          },
-          "required": ["location"]
-        }
-      }
-    }]
-  }'
-```
-
-## Image Input Example
-
-You can send OpenAI-style multimodal content (`text` + `image_url`, including `data:` URLs). The proxy converts image inputs into Copilot blob attachments.
-
 ## OpenAI SDK End-to-End Test
 
-`test_proxy.py` validates:
-
-- non-streaming responses
-- streaming responses
-- multi-turn behavior
-- image description
-- single tool call
-- streaming tool call
-- multi-step tool calling (date -> weather for tomorrow)
-
-Run:
+Run server:
 
 ```bash
 source .venv/bin/activate
@@ -219,6 +133,7 @@ In another terminal:
 
 ```bash
 source .venv/bin/activate
+export GITHUB_TOKEN=ghp_your_github_token
 python test_proxy.py
 ```
 
@@ -234,18 +149,18 @@ Run:
 
 ```bash
 docker run --rm -p 8081:8081 \
-  -e COPILOT_GITHUB_TOKEN="<your_token>" \
   -e PORT=8081 \
   copilot-sdk-openai-proxy
 ```
 
-Then use:
+Then open:
 
-- Base URL: `http://localhost:8081/v1`
-- API key in OpenAI clients: the GitHub token (same value as `COPILOT_GITHUB_TOKEN`), or any non-empty string if the CLI is already authenticated on the host
-- Login UI: `http://localhost:8081/auth` (not needed when token is set via env var)
+- Home UI: `http://localhost:8081/`
+- Auth UI: `http://localhost:8081/auth`
+- Dashboard UI: `http://localhost:8081/auth/dashboard`
 
 ## Notes
 
 - The proxy keeps compatibility with OpenAI request/response shapes for chat completions.
 - Tool execution follows the OpenAI flow: model requests tool calls, client executes tools, then client sends tool results back in follow-up messages.
+- Each GitHub token gets its own cached `CopilotClient`, so multiple tokens can be used concurrently.
