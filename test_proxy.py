@@ -19,12 +19,12 @@ BASE_URL = "http://localhost:8081/v1"
 MODEL = "gpt-5-mini"
 
 _token = os.environ.get("GITHUB_TOKEN", "")
-if not _token:
-    raise RuntimeError(
-        "GITHUB_TOKEN environment variable is not set. "
-        "Export your GitHub token before running this script:\n"
-        "    export GITHUB_TOKEN=ghp_..."
-    )
+# if not _token:
+#     raise RuntimeError(
+#         "GITHUB_TOKEN environment variable is not set. "
+#         "Export your GitHub token before running this script:\n"
+#         "    export GITHUB_TOKEN=ghp_..."
+#     )
 
 client = OpenAI(base_url=BASE_URL, api_key=_token)
 
